@@ -1,0 +1,28 @@
+version: '3'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: user-management-api
+    ports:
+      - "8000:8080"
+    environment:
+      - SERVER_PORT=8080
+      - DB_HOST=host.docker.internal
+      - DB_PORT=5432
+      - DB_USER=user
+      - DB_PASSWORD=password
+      - DB_NAME=testdb
+      - DB_SSLMODE=disable
+      - JWT_SECRET=supersecretkey
+      - JWT_EXPIRY=24
+      - LOG_LEVEL=debug
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  default:
+    name: user-management-network 
