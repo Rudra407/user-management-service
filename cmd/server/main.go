@@ -44,18 +44,24 @@ func main() {
 
 	// Migrate database
 	log.Info("Running database migrations...")
+	if err := models.SetupOrganizationTable(db); err != nil {
+		log.WithError(err).Fatal("Failed to set up organization table")
+	}
 	if err := models.SetupUserTable(db); err != nil {
-		log.WithError(err).Fatal("Failed to set up database tables")
+		log.WithError(err).Fatal("Failed to set up user table")
 	}
 
 	// Initialize repositories
 	userRepo := repositories.NewUserRepository(db, logger)
+	orgRepo := repositories.NewOrganizationRepository(db, logger)
 
 	// Initialize services
-	userService := services.NewUserService(userRepo, cfg, logger)
+	userService := services.NewUserService(userRepo, orgRepo, cfg, logger)
+	orgService := services.NewOrganizationService(orgRepo, userRepo, cfg, logger)
 
 	// Initialize handlers
 	userHandler := handlers.NewUserHandler(userService, logger)
+	orgHandler := handlers.NewOrganizationHandler(orgService, logger)
 
 	// Initialize echo
 	e := echo.New()
@@ -69,8 +75,12 @@ func main() {
 	// Create JWT middleware
 	jwtMiddleware := middleware.JWTMiddleware(cfg, logger)
 
+	// Create admin role middleware
+	adminMiddleware := middleware.RequireAdminRole
+
 	// Register routes
-	userHandler.RegisterRoutes(e, jwtMiddleware)
+	userHandler.RegisterRoutes(e, jwtMiddleware, adminMiddleware)
+	orgHandler.RegisterRoutes(e, jwtMiddleware, adminMiddleware)
 
 	// Add health check endpoint
 	e.GET("/health", func(c echo.Context) error {

@@ -10,7 +10,9 @@ import (
 
 // JWTClaims represents the claims in JWT token
 type JWTClaims struct {
-	UserID uint `json:"user_id"`
+	UserID         uint   `json:"user_id"`
+	OrganizationID uint   `json:"organization_id,omitempty"`
+	Role           string `json:"role,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -18,6 +20,27 @@ type JWTClaims struct {
 func GenerateToken(userID uint, secret string, expiry int) (string, error) {
 	claims := JWTClaims{
 		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * time.Duration(expiry))),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(secret))
+	if err != nil {
+		return "", err
+	}
+
+	return tokenString, nil
+}
+
+// GenerateTokenWithOrganization generates a new JWT token with organization ID and role
+func GenerateTokenWithOrganization(userID, organizationID uint, role, secret string, expiry int) (string, error) {
+	claims := JWTClaims{
+		UserID:         userID,
+		OrganizationID: organizationID,
+		Role:           role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * time.Duration(expiry))),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

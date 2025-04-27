@@ -38,6 +38,17 @@ func JWTMiddleware(config *config.Config, logger *utils.Logger) echo.MiddlewareF
 
 			// Set the user ID in context
 			c.Set("user_id", claims.UserID)
+
+			// Set organization ID if present
+			if claims.OrganizationID > 0 {
+				c.Set("organization_id", claims.OrganizationID)
+			}
+
+			// Set role if present
+			if claims.Role != "" {
+				c.Set("user_role", claims.Role)
+			}
+
 			return next(c)
 		}
 	}
@@ -50,4 +61,38 @@ func GetUserID(c echo.Context) (uint, error) {
 		return 0, echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 	return userID, nil
+}
+
+// GetOrganizationID gets the organization ID from context
+func GetOrganizationID(c echo.Context) (uint, error) {
+	orgID, ok := c.Get("organization_id").(uint)
+	if !ok {
+		return 0, echo.NewHTTPError(http.StatusUnauthorized, "Organization context not found")
+	}
+	return orgID, nil
+}
+
+// GetUserRole gets the user role from context
+func GetUserRole(c echo.Context) (string, error) {
+	role, ok := c.Get("user_role").(string)
+	if !ok {
+		return "", echo.NewHTTPError(http.StatusUnauthorized, "User role not found")
+	}
+	return role, nil
+}
+
+// RequireAdminRole middleware to check if user has admin role
+func RequireAdminRole(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		role, err := GetUserRole(c)
+		if err != nil {
+			return utils.UnauthorizedErrorResponse(c, "Unauthorized access")
+		}
+
+		if role != "admin" {
+			return utils.ForbiddenErrorResponse(c, "Admin role required")
+		}
+
+		return next(c)
+	}
 }

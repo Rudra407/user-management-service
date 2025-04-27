@@ -64,6 +64,11 @@ func UnauthorizedErrorResponse(c echo.Context, message string) error {
 	return ErrorResponse(c, http.StatusUnauthorized, message, nil)
 }
 
+// ForbiddenErrorResponse returns a forbidden error response
+func ForbiddenErrorResponse(c echo.Context, message string) error {
+	return ErrorResponse(c, http.StatusForbidden, message, nil)
+}
+
 // NotFoundErrorResponse returns a not found error response
 func NotFoundErrorResponse(c echo.Context, message string) error {
 	return ErrorResponse(c, http.StatusNotFound, message, nil)
