@@ -1,14 +1,23 @@
 # User Management Microservice
 
-A microservice for user account management built with Go, Echo, and PostgreSQL.
+A microservice for user account management with multi-tenant (organization) support built with Go, Echo, and PostgreSQL.
 
 ## Features
 
-- User registration
-- User login with JWT authentication
-- Fetch user profile by ID
-- Update user profile
-- Delete user account
+- Organization management (multi-tenant support)
+  - Create organizations with admin users
+  - Update organization details
+  - Delete organizations
+  - List organizations and their users
+- User management
+  - User registration within organizations
+  - User login with organization context
+  - JWT authentication with organization scope
+  - Fetch user profile by ID
+  - Update user profile
+  - Update user roles (admin, user)
+  - Delete user account
+  - List users within an organization
 - RESTful API design
 - Clean architecture (handlers, services, repositories)
 - Structured logging with request IDs
@@ -25,12 +34,30 @@ The service follows a clean architecture pattern with:
 
 ### API Endpoint Flows
 
-#### 1. User Registration
+#### 1. Organization Creation
+```
+┌─────────┐      ┌─────────────────────┐     ┌─────────────────────┐     ┌────────────────────┐     ┌────────────┐
+│  Client │──┬──>│ Create Organization │────>│ OrganizationService │────>│ OrganizationRepo   │────>│ PostgreSQL │
+└─────────┘  │   └─────────────────────┘     └─────────────────────┘     └────────────────────┘     └────────────┘
+             │          │                            │                           │                        │
+             │          │                            │                           │                        │
+             │          │                            │                           │                        │
+             │          │                            │<──────────────────────────│<─────────────────────────┤
+             │          │<───────────────────────────│                           │                        │
+             │<─────────│                            │                           │                        │
+└─────────┘      └─────────────────────┘     └─────────────────────┘     └────────────────────┘     └────────────┘
+```
+1. Client sends organization creation data (name, display_name, description, website, admin details)
+2. Handler validates request format
+3. Service creates organization and admin user account
+4. Repository creates organization and user records
+5. Response with created organization and admin details
+
+#### 2. User Registration (Organization-specific)
 ```
 ┌─────────┐      ┌─────────────┐     ┌──────────────┐     ┌────────────┐     ┌────────────┐
 │  Client │──┬──>│ Register API │────>│ UserService  │────>│ UserRepo   │────>│ PostgreSQL │
 └─────────┘  │   └─────────────┘     └──────────────┘     └────────────┘     └────────────┘
-             │          │                    │                   │                  │
              │          │                    │                   │                  │
              │          │                    │                   │                  │
              │          │                    │<──────────────────│<─────────────────┤
@@ -38,13 +65,14 @@ The service follows a clean architecture pattern with:
              │<─────────│                    │                   │                  │
 └─────────┘      └─────────────┘     └──────────────┘     └────────────┘     └────────────┘
 ```
-1. Client sends user registration data (name, email, password)
+1. Client sends user registration data (name, email, password, organization_id, role)
 2. Handler validates request format
-3. Service validates business rules and checks for duplicate email
-4. Repository creates new user record with hashed password
-5. Response with created user details (password excluded)
+3. Service validates business rules, checks for duplicate email within the organization
+4. Service verifies the organization exists
+5. Repository creates new user record with hashed password and organization association
+6. Response with created user details (password excluded)
 
-#### 2. User Login
+#### 3. User Login (Organization-specific)
 ```
 ┌─────────┐      ┌─────────────┐     ┌──────────────┐     ┌────────────┐     ┌────────────┐
 │  Client │──┬──>│  Login API  │────>│ UserService  │────>│ UserRepo   │────>│ PostgreSQL │
@@ -57,13 +85,13 @@ The service follows a clean architecture pattern with:
              │<─────────│                    │                   │                  │
 └─────────┘      └─────────────┘     └──────────────┘     └────────────┘     └────────────┘
 ```
-1. Client sends credentials (email, password)
+1. Client sends credentials (email, password, organization_id)
 2. Handler validates request format
-3. Service authenticates user by finding by email and validating password
-4. JWT token is generated with user ID and expiration
+3. Service authenticates user by finding by email + organization and validating password
+4. JWT token is generated with user ID, organization ID, and user role
 5. Response with JWT token
 
-#### 3. Fetch User Profile
+#### 4. Fetch User Profile
 ```
 ┌─────────┐      ┌─────────────┐     ┌────────────┐     ┌──────────────┐     ┌────────────┐     ┌────────────┐
 │  Client │──┬──>│JWT Middleware│────>│ Profile API│────>│ UserService  │────>│ UserRepo   │────>│ PostgreSQL │
@@ -77,50 +105,32 @@ The service follows a clean architecture pattern with:
 └─────────┘      └─────────────┘     └────────────┘     └──────────────┘     └────────────┘     └────────────┘
 ```
 1. Client sends request with JWT in Authorization header
-2. JWT middleware validates token and extracts user ID
-3. Handler receives authorized request with user ID
+2. JWT middleware validates token and extracts user ID, organization ID, and role
+3. Handler receives authorized request with user context
 4. Service fetches user by ID
 5. Repository retrieves user from database
 6. Response with user details (password excluded)
 
-#### 4. Update User Profile
+#### 5. List Organization Users (Admin only)
 ```
-┌─────────┐      ┌─────────────┐     ┌────────────┐     ┌──────────────┐     ┌────────────┐     ┌────────────┐
-│  Client │──┬──>│JWT Middleware│────>│ Update API │────>│ UserService  │────>│ UserRepo   │────>│ PostgreSQL │
-└─────────┘  │   └─────────────┘     └────────────┘     └──────────────┘     └────────────┘     └────────────┘
-             │          │                   │                   │                   │                  │
-             │          │                   │                   │                   │                  │
-             │          │                   │                   │<──────────────────│<─────────────────┤
-             │          │                   │<──────────────────│                   │                  │
-             │          │<──────────────────│                   │                   │                  │
-             │<─────────│                   │                   │                   │                  │
-└─────────┘      └─────────────┘     └────────────┘     └──────────────┘     └────────────┘     └────────────┘
+┌─────────┐      ┌───────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌────────────┐     ┌────────────┐
+│  Client │──┬──>│JWT+Admin      │────>│ Org Users API   │────>│ OrgService      │────>│ UserRepo   │────>│ PostgreSQL │
+│         │  │   │Middleware     │     │                 │     │                 │     │            │     │            │
+└─────────┘  │   └───────────────┘     └─────────────────┘     └─────────────────┘     └────────────┘     └────────────┘
+             │          │                      │                       │                      │                 │
+             │          │                      │                       │                      │                 │
+             │          │                      │                       │<─────────────────────│<────────────────┤
+             │          │                      │<──────────────────────│                      │                 │
+             │          │<─────────────────────│                       │                      │                 │
+             │<─────────│                      │                       │                      │                 │
+└─────────┘      └───────────────┘     └─────────────────┘     └─────────────────┘     └────────────┘     └────────────┘
 ```
-1. Client sends update data (name, email, password) with JWT
-2. JWT middleware validates token and extracts user ID
-3. Handler validates request format
-4. Service validates business rules (e.g., checking for duplicate email if email changed)
-5. Repository updates user in database
-6. Response with updated user details (password excluded)
-
-#### 5. Delete User Account
-```
-┌─────────┐      ┌─────────────┐     ┌────────────┐     ┌──────────────┐     ┌────────────┐     ┌────────────┐
-│  Client │──┬──>│JWT Middleware│────>│ Delete API │────>│ UserService  │────>│ UserRepo   │────>│ PostgreSQL │
-└─────────┘  │   └─────────────┘     └────────────┘     └──────────────┘     └────────────┘     └────────────┘
-             │          │                   │                   │                   │                  │
-             │          │                   │                   │                   │                  │
-             │          │                   │                   │<──────────────────│<─────────────────┤
-             │          │                   │<──────────────────│                   │                  │
-             │          │<──────────────────│                   │                   │                  │
-             │<─────────│                   │                   │                   │                  │
-└─────────┘      └─────────────┘     └────────────┘     └──────────────┘     └────────────┘     └────────────┘
-```
-1. Client sends request with JWT
-2. JWT middleware validates token and extracts user ID
-3. Service verifies user exists
-4. Repository soft-deletes user in database (sets DeletedAt field)
-5. Response with success message
+1. Client sends request with JWT containing admin role
+2. JWT middleware validates token and verifies admin role
+3. Handler receives authorized request
+4. Service fetches organization users with pagination
+5. Repository retrieves users for the organization
+6. Response with list of users and pagination metadata
 
 ## Project Structure
 
@@ -128,14 +138,22 @@ The service follows a clean architecture pattern with:
 user-management-service/
 ├── api/
 │   ├── handlers/        # HTTP handlers
+│   │   ├── organization_handler.go # Organization endpoints
+│   │   └── user_handler.go         # User endpoints
 │   └── middleware/      # Echo middleware
 ├── cmd/
 │   └── server/          # Application entry point
 ├── config/              # Configuration
 ├── internal/
 │   ├── models/          # Database models
+│   │   ├── organization.go  # Organization model
+│   │   └── user.go          # User model
 │   ├── repositories/    # Data access layer
+│   │   ├── organization_repository.go # Organization data access
+│   │   └── user_repository.go         # User data access
 │   └── services/        # Business logic
+│       ├── organization_service.go # Organization operations
+│       └── user_service.go         # User operations
 ├── tests/               # Tests
 ├── utils/               # Utility packages
 ├── Dockerfile           # Docker build file
@@ -146,16 +164,31 @@ user-management-service/
 
 ## API Endpoints
 
-| Method | URL                 | Description        | Auth Required |
-|--------|---------------------|--------------------|--------------|
-| POST   | /api/register       | Register new user  | No           |
-| POST   | /api/login          | Login              | No           |
-| GET    | /api/users/profile  | Get user profile   | Yes          |
-| GET    | /api/users/:id      | Get user by ID     | Yes          |
-| PUT    | /api/users          | Update user        | Yes          |
-| DELETE | /api/users          | Delete user        | Yes          |
-| GET    | /api/users          | List users         | Yes          |
-| GET    | /health             | Health check       | No           |
+### Organization Endpoints
+
+| Method | URL                        | Description                | Auth Required | Admin Required |
+|--------|----------------------------|----------------------------|--------------|---------------|
+| POST   | /api/organizations         | Create organization        | No           | No            |
+| GET    | /api/organizations         | List organizations         | Yes          | No            |
+| GET    | /api/organizations/:id     | Get organization by ID     | Yes          | No            |
+| PUT    | /api/organizations/:id     | Update organization        | Yes          | Yes           |
+| DELETE | /api/organizations/:id     | Delete organization        | Yes          | Yes           |
+| GET    | /api/organizations/:id/users | List organization users  | Yes          | Yes           |
+
+### User Endpoints
+
+| Method | URL                       | Description                | Auth Required | Admin Required |
+|--------|---------------------------|----------------------------|--------------|---------------|
+| POST   | /api/register             | Register new user          | No           | No            |
+| POST   | /api/login                | Login                      | No           | No            |
+| GET    | /api/users/profile        | Get user profile           | Yes          | No            |
+| GET    | /api/users/:id            | Get user by ID             | Yes          | No            |
+| PUT    | /api/users                | Update user                | Yes          | No            |
+| PUT    | /api/users/:id/role       | Update user role           | Yes          | Yes           |
+| DELETE | /api/users                | Delete current user        | Yes          | No            |
+| DELETE | /api/users/:id            | Delete user by ID          | Yes          | Yes           |
+| GET    | /api/users                | List users (org-scoped)    | Yes          | No            |
+| GET    | /health                   | Health check               | No           | No            |
 
 ## Setup Instructions
 
@@ -222,72 +255,123 @@ To run the tests:
 go test ./tests/...
 ```
 
-## Complete Flow Example
+## Complete API Usage Examples
 
-Here's a shell script that demonstrates a complete flow from user registration to deletion:
+Below are curl commands for the main API flows:
+
+### Organization Flow
 
 ```bash
-#!/bin/bash
-set -e  # Exit on error
-
-echo "1. REGISTERING A NEW USER..."
-REGISTER_RESPONSE=$(curl -s -X POST http://localhost:8000/api/register \
+# 1. Create a new organization with an admin user
+curl -X POST http://localhost:8080/api/organizations \
   -H "Content-Type: application/json" \
-  -d '{"name":"John Doe", "email":"john.doe@example.com", "password":"password123"}')
-echo "$REGISTER_RESPONSE" | jq .
-echo
+  -d '{
+    "name": "acme",
+    "display_name": "ACME Corporation",
+    "description": "A fictional company",
+    "website": "https://acme.example.com",
+    "admin_name": "Admin User",
+    "admin_email": "admin@acme.example.com",
+    "admin_password": "secure_password"
+  }'
 
-echo "2. LOGGING IN..."
-LOGIN_RESPONSE=$(curl -s -X POST http://localhost:8000/api/login \
+# 2. Login as the admin user
+curl -X POST http://localhost:8080/api/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"john.doe@example.com", "password":"password123"}')
-echo "$LOGIN_RESPONSE" | jq .
-TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r .data.token)
-echo
+  -d '{
+    "email": "admin@acme.example.com",
+    "password": "secure_password",
+    "organization_id": 1
+  }'
+# Response contains JWT token to use in subsequent requests
 
-echo "3. GETTING USER PROFILE..."
-PROFILE_RESPONSE=$(curl -s -X GET http://localhost:8000/api/users/profile \
-  -H "Authorization: Bearer $TOKEN")
-echo "$PROFILE_RESPONSE" | jq .
-USER_ID=$(echo "$PROFILE_RESPONSE" | jq -r .data.id)
-echo
+# 3. Get organization details
+curl -X GET http://localhost:8080/api/organizations/1 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
 
-echo "4. GETTING USER BY ID ($USER_ID)..."
-USER_BY_ID_RESPONSE=$(curl -s -X GET "http://localhost:8000/api/users/$USER_ID" \
-  -H "Authorization: Bearer $TOKEN")
-echo "$USER_BY_ID_RESPONSE" | jq .
-echo
-
-echo "5. UPDATING USER PROFILE..."
-UPDATE_RESPONSE=$(curl -s -X PUT http://localhost:8000/api/users \
-  -H "Authorization: Bearer $TOKEN" \
+# 4. Update organization
+curl -X PUT http://localhost:8080/api/organizations/1 \
   -H "Content-Type: application/json" \
-  -d '{"name":"John Doe Updated"}')
-echo "$UPDATE_RESPONSE" | jq .
-echo
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "display_name": "ACME Corp Updated",
+    "description": "Updated company description",
+    "website": "https://acme-updated.example.com"
+  }'
 
-echo "6. LISTING ALL USERS..."
-LIST_RESPONSE=$(curl -s -X GET "http://localhost:8000/api/users?page=1&per_page=10" \
-  -H "Authorization: Bearer $TOKEN")
-echo "$LIST_RESPONSE" | jq .
-echo
+# 5. List all organizations
+curl -X GET "http://localhost:8080/api/organizations?page=1&per_page=10" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
 
-echo "7. CHECKING SERVICE HEALTH..."
-HEALTH_RESPONSE=$(curl -s -X GET http://localhost:8000/health)
-echo "$HEALTH_RESPONSE" | jq .
-echo
+# 6. List organization users
+curl -X GET "http://localhost:8080/api/organizations/1/users?page=1&per_page=10" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
 
-echo "8. DELETING USER..."
-DELETE_RESPONSE=$(curl -s -X DELETE http://localhost:8000/api/users \
-  -H "Authorization: Bearer $TOKEN")
-echo "$DELETE_RESPONSE" | jq .
-echo
+### User Flow Within Organization
 
-echo "9. VERIFYING DELETION BY TRYING TO LOGIN AGAIN..."
-LOGIN_AFTER_DELETE_RESPONSE=$(curl -s -X POST http://localhost:8000/api/login \
+```bash
+# 1. Register a new user in the organization
+curl -X POST http://localhost:8080/api/register \
   -H "Content-Type: application/json" \
-  -d '{"email":"john.doe@example.com", "password":"password123"}')
-echo "$LOGIN_AFTER_DELETE_RESPONSE" | jq .
+  -d '{
+    "name": "John Doe",
+    "email": "john@acme.example.com",
+    "password": "password123",
+    "organization_id": 1,
+    "role": "user"
+  }'
+
+# 2. Login as the new user
+curl -X POST http://localhost:8080/api/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "john@acme.example.com",
+    "password": "password123",
+    "organization_id": 1
+  }'
+# Response contains JWT token to use in subsequent requests
+
+# 3. Get user profile
+curl -X GET http://localhost:8080/api/users/profile \
+  -H "Authorization: Bearer USER_JWT_TOKEN"
+
+# 4. Get user by ID
+curl -X GET http://localhost:8080/api/users/2 \
+  -H "Authorization: Bearer USER_JWT_TOKEN"
+
+# 5. Update user profile
+curl -X PUT http://localhost:8080/api/users \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer USER_JWT_TOKEN" \
+  -d '{
+    "name": "John Doe Updated",
+    "email": "john.updated@acme.example.com"
+  }'
+
+# 6. Admin updating user role (requires admin token)
+curl -X PUT http://localhost:8080/api/users/2/role \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ADMIN_JWT_TOKEN" \
+  -d '{
+    "role": "admin"
+  }'
+
+# 7. List users in organization
+curl -X GET "http://localhost:8080/api/users?page=1&per_page=10" \
+  -H "Authorization: Bearer USER_JWT_TOKEN"
+
+# 8. Delete user (self)
+curl -X DELETE http://localhost:8080/api/users \
+  -H "Authorization: Bearer USER_JWT_TOKEN"
+
+# 9. Admin deleting user by ID (requires admin token)
+curl -X DELETE http://localhost:8080/api/users/2 \
+  -H "Authorization: Bearer ADMIN_JWT_TOKEN"
+
+# 10. Delete organization (requires admin token)
+curl -X DELETE http://localhost:8080/api/organizations/1 \
+  -H "Authorization: Bearer ADMIN_JWT_TOKEN"
 ```
 
 ## License

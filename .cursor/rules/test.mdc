@@ -1,0 +1,134 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Cursor Rules for Writing Test Cases
+
+## 1. Mocking Database Methods
+- **Mock Database Client**: Use a mock database client to simulate database interactions. Define a `MockDatabaseClient` struct that implements the database interface.
+  ```go
+  type MockDatabaseClient struct {
+      mock.Mock
+  }
+  ```
+- **Mock Methods**: Use `mockDb.On` to mock specific database methods and define their return values.
+  ```go
+  mockDb := &MockDatabaseClient{}
+  mockDb.On("RetrieveCountryByID", 229).Return(model.CountryResponseByID{ID: 1, IsActive: true}, errors.New("some error"))
+  ```
+- **Return Values**: Specify the return values for the mocked method. Use `Return` for success and `errors.New` for error scenarios.
+  ```go
+  mockDb.On("GetUser", "123").Return(model.User{ID: "123", Name: "John"}, nil)
+  mockDb.On("GetUser", "456").Return(model.User{}, errors.New("user not found"))
+  ```
+
+## 2. Mocking External Clients
+- **Mock External Clients**: For external services (e.g., Okta, SSO), create a mock struct that implements the interface of the client.
+  ```go
+  type MockOktaClient struct {
+      mock.Mock
+  }
+
+  func (m *MockOktaClient) GetOktaUser(userName string) (model.OktaUser, *model.Error) {
+      args := m.Called(userName)
+      return args.Get(0).(model.OktaUser), args.Get(1).(*model.Error)
+  }
+  ```
+- **Mock Methods**: Use `mockClient.On` to mock specific methods of the external client.
+  ```go
+  mockOktaClient := &MockOktaClient{}
+  mockOktaClient.On("GetOktaUser", "user1").Return(model.OktaUser{ID: "123", Name: "John"}, nil)
+  ```
+
+## 3. Test Case Structure
+- **Test Name**: Use descriptive names that indicate the scenario being tested (e.g., `TestGetUserSuccess`, `TestUpdateUserProfileDBFailed`).
+- **Arrange**: Set up the mock data and expectations.
+  ```go
+  mockDb := &MockDatabaseClient{}
+  mockDb.On("GetUser", "123").Return(model.User{ID: "123", Name: "John"}, nil)
+  ```
+- **Act**: Call the function being tested.
+  ```go
+  user, err := client.GetUser("123")
+  ```
+- **Assert**: Verify the results and ensure all expectations were met.
+  ```go
+  assert.NoError(t, err)
+  assert.Equal(t, "John", user.Name)
+  mockDb.AssertExpectations(t)
+  ```
+
+## 4. Error Scenarios
+- **Database Errors**: Simulate database errors using `Return` with an error.
+  ```go
+  mockDb.On("GetUser", "456").Return(model.User{}, errors.New("user not found"))
+  ```
+- **External Service Errors**: Mock the client to return errors.
+  ```go
+  mockOktaClient.On("GetOktaUser", "user1").Return(model.OktaUser{}, &model.Error{Code: 500, Message: "Internal Server Error"})
+  ```
+
+## 5. Test Data
+- **Mock Data**: Use realistic mock data that matches the expected response.
+  ```go
+  mockUser := model.User{
+      ID:   "123",
+      Name: "John",
+  }
+  ```
+- **Test Cases**: Use a slice of test cases for multiple scenarios.
+  ```go
+  testCases := []struct {
+      name     string
+      input    string
+      expected model.User
+      err      error
+  }{
+      {"Success", "123", mockUser, nil},
+      {"NotFound", "456", model.User{}, errors.New("user not found")},
+  }
+  ```
+
+## 6. Common Patterns
+- **Query Matching**: Use `sqlmock.QueryMatcherEqual` for exact query matching (if using `sqlmock`).
+  ```go
+  db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+  ```
+- **Rows Mocking**: Use `sqlmock.NewRows` to mock database rows (if using `sqlmock`).
+  ```go
+  rows := sqlmock.NewRows([]string{"id", "name"}).AddRow(1, "John")
+  ```
+- **Error Types**: Use specific error types for different scenarios (e.g., `DBError`, `NotFoundError`).
+
+## 7. Test Utilities
+- **Helper Functions**: Create helper functions for common tasks (e.g., setting up mocks, asserting results).
+  ```go
+  func setupMockDB(t *testing.T) (*MockDatabaseClient, *MockOktaClient) {
+      mockDb := &MockDatabaseClient{}
+      mockOktaClient := &MockOktaClient{}
+      return mockDb, mockOktaClient
+  }
+  ```
+
+## 8. Example Test Case
+```go
+func TestGetUserSuccess(t *testing.T) {
+    // Arrange
+    mockDb := &MockDatabaseClient{}
+    mockDb.On("GetUser", "123").Return(model.User{ID: "123", Name: "John"}, nil)
+
+    // Act
+    user, err := client.GetUser("123")
+
+    // Assert
+    assert.NoError(t, err)
+    assert.Equal(t, "John", user.Name)
+    mockDb.AssertExpectations(t)
+}
+```
+
+## 9. Best Practices
+- **Keep Tests Focused**: Each test should focus on a single scenario.
+- **Use Descriptive Names**: Test names should clearly describe the scenario being tested.
+- **Clean Up**: Ensure all mocks are properly closed and expectations are verified.
