@@ -48,14 +48,27 @@ func main() {
 		log.WithError(err).Fatal("Failed to set up database tables")
 	}
 
+	// Migrate organization tables
+	if err := models.SetupOrganizationTable(db); err != nil {
+		log.WithError(err).Fatal("Failed to set up organization table")
+	}
+
+	// Migrate user_organization tables
+	if err := models.SetupUserOrganizationTable(db); err != nil {
+		log.WithError(err).Fatal("Failed to set up user_organization table")
+	}
+
 	// Initialize repositories
 	userRepo := repositories.NewUserRepository(db, logger)
+	orgRepo := repositories.NewOrganizationRepository(db, logger)
 
 	// Initialize services
-	userService := services.NewUserService(userRepo, cfg, logger)
+	userService := services.NewUserService(userRepo, cfg, logger, orgRepo)
+	orgService := services.NewOrganizationService(orgRepo, cfg, logger)
 
 	// Initialize handlers
 	userHandler := handlers.NewUserHandler(userService, logger)
+	orgHandler := handlers.NewOrganizationHandler(orgService, logger)
 
 	// Initialize echo
 	e := echo.New()
@@ -71,6 +84,7 @@ func main() {
 
 	// Register routes
 	userHandler.RegisterRoutes(e, jwtMiddleware)
+	orgHandler.RegisterRoutes(e)
 
 	// Add health check endpoint
 	e.GET("/health", func(c echo.Context) error {
