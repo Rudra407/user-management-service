@@ -16,19 +16,21 @@ type UserService struct {
 	UserRepo repositories.UserRepository
 	Config   *config.Config
 	Logger   *utils.Logger
+	OrgRepo  repositories.OrganizationRepository
 }
 
 // NewUserService creates a new user service
-func NewUserService(userRepo repositories.UserRepository, config *config.Config, logger *utils.Logger) *UserService {
+func NewUserService(userRepo repositories.UserRepository, config *config.Config, logger *utils.Logger, orgRepo repositories.OrganizationRepository) *UserService {
 	return &UserService{
 		UserRepo: userRepo,
 		Config:   config,
 		Logger:   logger,
+		OrgRepo:  orgRepo,
 	}
 }
 
-// RegisterUser registers a new user
-func (s *UserService) RegisterUser(ctx context.Context, name, email, password string) (*models.User, error) {
+// RegisterUser registers a new user and optionally assigns them to an organization
+func (s *UserService) RegisterUser(ctx context.Context, name, email, password string, organizationID *uint) (*models.User, error) {
 	log := s.Logger.WithContext(ctx)
 
 	// Validate input
@@ -44,17 +46,54 @@ func (s *UserService) RegisterUser(ctx context.Context, name, email, password st
 		return nil, errors.New("email already registered")
 	}
 
-	// Create user
+	// An organization ID is now required
+	if organizationID == nil {
+		return nil, errors.New("organization ID is required")
+	}
+
+	// Validate the organization exists
+	org, err := s.OrgRepo.FindByID(ctx, *organizationID)
+	if err != nil {
+		log.WithError(err).WithField("org_id", *organizationID).Warn("Organization not found")
+		return nil, errors.New("organization not found")
+	}
+
+	if !org.Active {
+		log.WithField("org_id", *organizationID).Warn("Organization is inactive")
+		return nil, errors.New("organization is inactive")
+	}
+
+	// Create user with direct organization link
 	user := &models.User{
-		Name:     name,
-		Email:    email,
-		Password: password,
+		Name:           name,
+		Email:          email,
+		Password:       password,
+		OrganizationID: organizationID,
 	}
 
 	if err := s.UserRepo.Create(ctx, user); err != nil {
 		log.WithError(err).Error("Failed to create user")
 		return nil, err
 	}
+
+	// Also maintain the user_organization relationship for roles and additional data
+	userOrg := &models.UserOrganization{
+		UserID:         user.ID,
+		OrganizationID: *organizationID,
+		Role:           models.RoleMember,
+		Active:         true,
+	}
+
+	if err := s.OrgRepo.AddUserToOrg(ctx, userOrg); err != nil {
+		log.WithError(err).Error("Failed to add user to organization")
+		// If adding to organization fails, we don't rollback user creation but return the error
+		return user, errors.New("user created but failed to add to organization: " + err.Error())
+	}
+
+	log.WithFields(map[string]interface{}{
+		"user_id": user.ID,
+		"org_id":  *organizationID,
+	}).Info("User added to organization")
 
 	log.WithField("user_id", user.ID).Info("User registered successfully")
 	return user, nil
@@ -181,6 +220,38 @@ func (s *UserService) ListUsers(ctx context.Context, page, perPage int) ([]model
 
 	log.WithField("total", total).Debug("Users listed successfully")
 	return users, total, nil
+}
+
+// GetUserOrganization gets the organization for a user
+func (s *UserService) GetUserOrganization(ctx context.Context, userID uint) (*models.Organization, error) {
+	log := s.Logger.WithContext(ctx)
+
+	// Find user to get organization ID
+	user, err := s.UserRepo.FindByID(ctx, userID)
+	if err != nil {
+		log.WithError(err).WithField("user_id", userID).Warn("User not found")
+		return nil, errors.New("user not found")
+	}
+
+	// Check if user has an organization set
+	if user.OrganizationID == nil {
+		log.WithField("user_id", userID).Info("User is not part of any organization")
+		return nil, nil
+	}
+
+	// Get the organization details
+	org, err := s.OrgRepo.FindByID(ctx, *user.OrganizationID)
+	if err != nil {
+		log.WithError(err).WithField("org_id", *user.OrganizationID).Error("Failed to find organization")
+		return nil, err
+	}
+
+	log.WithFields(map[string]interface{}{
+		"user_id": userID,
+		"org_id":  org.ID,
+	}).Info("User organization retrieved successfully")
+
+	return org, nil
 }
 
 // validateRegistration validates registration input

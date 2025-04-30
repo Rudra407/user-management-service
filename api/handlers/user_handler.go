@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/user/user-management-service/api/middleware"
 	"github.com/user/user-management-service/internal/services"
@@ -46,22 +47,53 @@ type UpdateUserRequest struct {
 
 // Register handles user registration
 func (h *UserHandler) Register(c echo.Context) error {
-	ctx := utils.NewRequestContext()
+	ctx := c.Request().Context()
 	log := h.Logger.WithContext(ctx)
 
-	var req RegisterRequest
+	// Parse request body
+	var req struct {
+		Name           string `json:"name"`
+		Email          string `json:"email"`
+		Password       string `json:"password"`
+		OrganizationID uint   `json:"organization_id"` // Required field now
+	}
+
 	if err := c.Bind(&req); err != nil {
 		log.WithError(err).Warn("Invalid request payload")
-		return utils.ValidationErrorResponse(c, "Invalid request payload", []string{err.Error()})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request payload"})
 	}
 
-	user, err := h.UserService.RegisterUser(ctx, req.Name, req.Email, req.Password)
+	// Validate request
+	if req.Name == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Name is required"})
+	}
+
+	if req.Email == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Email is required"})
+	}
+
+	if req.Password == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Password is required"})
+	}
+
+	if len(req.Password) < 6 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Password must be at least 6 characters"})
+	}
+
+	if req.OrganizationID == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Organization ID is required"})
+	}
+
+	// Register user
+	orgID := req.OrganizationID
+	user, err := h.UserService.RegisterUser(ctx, req.Name, req.Email, req.Password, &orgID)
 	if err != nil {
 		log.WithError(err).Error("Failed to register user")
-		return utils.ErrorResponse(c, http.StatusBadRequest, "Failed to register user", []string{err.Error()})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	return utils.SuccessResponse(c, user, "User registered successfully")
+	log.WithField("user_id", user.ID).Info("User registered successfully")
+	return c.JSON(http.StatusCreated, user)
 }
 
 // Login handles user login
@@ -221,9 +253,30 @@ func (h *UserHandler) ListUsers(c echo.Context) error {
 	return c.JSON(http.StatusOK, response)
 }
 
-// RegisterRoutes registers the user routes
+// GetUserOrganization retrieves the organization for the authenticated user
+func (h *UserHandler) GetUserOrganization(c echo.Context) error {
+	// Get user from JWT token
+	user := c.Get("user").(*jwt.Token)
+	claims := user.Claims.(*utils.JWTClaims)
+	userID := claims.UserID
+	ctx := c.Request().Context()
+
+	// Find the user's organization
+	organization, err := h.UserService.GetUserOrganization(ctx, userID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to retrieve user organization"})
+	}
+
+	if organization == nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "User is not part of any organization"})
+	}
+
+	return c.JSON(http.StatusOK, organization)
+}
+
+// RegisterRoutes registers user routes
 func (h *UserHandler) RegisterRoutes(e *echo.Echo, jwtMiddleware echo.MiddlewareFunc) {
-	// Public routes
+	// Public routes - no authentication needed
 	e.POST("/api/register", h.Register)
 	e.POST("/api/login", h.Login)
 
@@ -236,4 +289,5 @@ func (h *UserHandler) RegisterRoutes(e *echo.Echo, jwtMiddleware echo.Middleware
 	userGroup.GET("/:id", h.GetUserByID)
 	userGroup.PUT("", h.UpdateUser)
 	userGroup.DELETE("", h.DeleteUser)
+	userGroup.GET("/organization", h.GetUserOrganization)
 }

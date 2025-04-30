@@ -54,9 +54,9 @@ func Load() (*Config, error) {
 	} else {
 		return nil, fmt.Errorf("invalid database port: %w", err)
 	}
-	config.Database.User = getEnv("DB_USER", "postgres")
-	config.Database.Password = getEnv("DB_PASSWORD", "postgres")
-	config.Database.Name = getEnv("DB_NAME", "user_management")
+	config.Database.User = getEnv("DB_USER", "user")
+	config.Database.Password = getEnv("DB_PASSWORD", "password")
+	config.Database.Name = getEnv("DB_NAME", "testdb")
 	config.Database.SSLMode = getEnv("DB_SSLMODE", "disable")
 
 	// JWT config
